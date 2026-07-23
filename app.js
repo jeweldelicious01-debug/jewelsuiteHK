@@ -472,20 +472,30 @@ async function exportDailyRevenue() {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Daily Revenue");
 
+  // Updated columns to include Tariff
   sheet.columns = [
     { header: "Room No", key: "room", width: 15 },
+    { header: "Tariff", key: "tariff", width: 15 },
     { header: "Food Bill", key: "food", width: 15 },
     { header: "Laundry Bill", key: "laundry", width: 15 },
-    { header: "Total", key: "total", width: 15 }
+    { header: "Total Revenue", key: "total", width: 18 }
   ];
 
   Object.values(state.rooms).forEach(r => {
     const stay = r.currentStay || {};
+    const tariff = stay.tariff || 0;
+    const food = stay.foodBill || 0;
+    const laundry = stay.laundryBill || 0;
+    
+    // Total Revenue = Tariff + Food + Laundry
+    const totalRevenue = tariff + food + laundry;
+
     sheet.addRow({
       room: r.roomNumber,
-      food: stay.foodBill || 0,
-      laundry: stay.laundryBill || 0,
-      total: (stay.foodBill || 0) + (stay.laundryBill || 0)
+      tariff: tariff,
+      food: food,
+      laundry: laundry,
+      total: totalRevenue
     });
   });
 
