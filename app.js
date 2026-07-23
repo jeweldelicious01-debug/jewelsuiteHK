@@ -2,13 +2,15 @@ import { auth, db } from "./firebase-config.js";
 import { 
   signInWithEmailAndPassword, 
   signOut, 
-  onAuthStateChanged 
+  onAuthStateChanged,
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { 
   doc, getDoc, setDoc, updateDoc, collection, onSnapshot, addDoc, query, where, getDocs, Timestamp 
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-// Application State
+// Global Application State
 const state = {
   currentUser: null,
   userProfile: null,
@@ -17,7 +19,14 @@ const state = {
   activeRoomId: null
 };
 
-// Floor Mapping
+// Default Accounts Configuration for Initial Auto-Creation
+const DEFAULT_ACCOUNTS = [
+  { email: "admin@hotel.com", pass: "Admin123!", role: "admin", name: "System Admin" },
+  { email: "reception@hotel.com", pass: "Reception123!", role: "reception", name: "Front Desk Reception" },
+  { email: "housekeeping@hotel.com", pass: "Housekeeper123!", role: "housekeeping", name: "Head Housekeeper" }
+];
+
+// Floor Structure
 const ROOM_FLOORS = {
   "3rd Floor": ["301","302","303","304","305","306","307","308"],
   "4th Floor": ["401","402","403","404","405","406","407","408"],
@@ -26,21 +35,45 @@ const ROOM_FLOORS = {
 };
 
 const INITIAL_CHECKLIST = {
-  stripBed: false,
-  replaceTowels: false,
-  sanitizeBathroom: false,
-  vacuumFloor: false,
-  restockMinibar: false,
-  checkAppliances: false,
-  emptyTrash: false,
-  finalInspection: false
+  stripBed: false, replaceTowels: false, sanitizeBathroom: false, vacuumFloor: false,
+  restockMinibar: false, checkAppliances: false, emptyTrash: false, finalInspection: false
 };
 
-// --- AUTHENTICATION LISTENERS ---
+// --- INITIALIZATION & AUTO-SEEDING ---
+async function ensureDefaultUsersExist() {
+  for (const acc of DEFAULT_ACCOUNTS) {
+    try {
+      // Attempt login to verify existence
+      await signInWithEmailAndPassword(auth, acc.email, acc.pass);
+    } catch (err) {
+      if (err.code === "auth/user-not-found" || err.code === "auth/invalid-credential") {
+        try {
+          // Register default user if missing
+          const cred = await createUserWithEmailAndPassword(auth, acc.email, acc.pass);
+          await setDoc(doc(db, "users", cred.user.uid), {
+            uid: cred.user.uid,
+            email: acc.email,
+            name: acc.name,
+            role: acc.role
+          });
+          console.log(`Auto-created account: ${acc.email}`);
+        } catch (createErr) {
+          console.warn(`Could not auto-create ${acc.email}:`, createErr.message);
+        }
+      }
+    }
+  }
+}
+
+// Automatically attempt account seeding on script load
+ensureDefaultUsersExist();
+
+// --- AUTHENTICATION LISTENER ---
 onAuthStateChanged(auth, async (user) => {
   if (user) {
     state.currentUser = user;
     const userDoc = await getDoc(doc(db, "users", user.uid));
+    
     if (userDoc.exists()) {
       state.userProfile = userDoc.data();
       document.getElementById("userDisplay").textContent = `${state.userProfile.name} (${state.userProfile.role.toUpperCase()})`;
@@ -48,27 +81,27 @@ onAuthStateChanged(auth, async (user) => {
       toggleUIByRole(state.userProfile.role);
       showView("appView");
       initDataListeners();
-    } else {
-      alert("No profile role found for user.");
     }
   } else {
     showView("authView");
   }
 });
 
-// LOGIN FORM
+// LOGIN SUBMIT HANDLER
 document.getElementById("loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const email = document.getElementById("loginEmail").value;
   const pass = document.getElementById("loginPassword").value;
+  document.getElementById("authError").textContent = "";
+
   try {
     await signInWithEmailAndPassword(auth, email, pass);
   } catch (err) {
-    document.getElementById("authError").textContent = err.message;
+    document.getElementById("authError").textContent = "Invalid login credentials. Default credentials: admin@hotel.com / Admin123!";
   }
 });
 
-// UI ROUTING & RBAC
+// ROUTING & ACCESS CONTROLS
 function showView(viewId) {
   document.querySelectorAll(".view").forEach(v => v.classList.add("hidden"));
   document.getElementById(viewId).classList.remove("hidden");
@@ -90,9 +123,8 @@ function toggleUIByRole(role) {
   }
 }
 
-// --- FIRESTORE REAL-TIME SUBSCRIPTIONS ---
+// --- REAL-TIME FIRESTORE LISTENERS ---
 function initDataListeners() {
-  // Listen to Rooms Collection
   onSnapshot(collection(db, "rooms"), (snapshot) => {
     snapshot.forEach(docSnap => {
       state.rooms[docSnap.id] = docSnap.data();
@@ -100,7 +132,6 @@ function initDataListeners() {
     renderDashboard();
   });
 
-  // Listen to Catalogs
   ["amenities", "linen", "tcm"].forEach(cat => {
     onSnapshot(doc(db, "catalogs", cat), (docSnap) => {
       if (docSnap.exists()) {
@@ -110,11 +141,10 @@ function initDataListeners() {
   });
 }
 
-// --- DASHBOARD RENDER ---
+// --- DASHBOARD UI ---
 function renderDashboard() {
   const container = document.getElementById("floorContainer");
   container.innerHTML = "";
-
   let counts = { empty: 0, occupied: 0, maintenance: 0, cleaning: 0 };
 
   Object.entries(ROOM_FLOORS).forEach(([floorName, roomList]) => {
@@ -143,31 +173,27 @@ function renderDashboard() {
     container.appendChild(floorSec);
   });
 
-  // Update Summary Counts
   document.getElementById("countEmpty").textContent = counts.empty;
   document.getElementById("countOccupied").textContent = counts.occupied;
   document.getElementById("countMaintenance").textContent = counts.maintenance;
   document.getElementById("countCleaning").textContent = counts.cleaning;
 }
 
-// --- INTERACTION HANDLING ---
 function handleRoomClick(roomId) {
   state.activeRoomId = roomId;
-  const role = state.userProfile.role;
-
-  if (role === "housekeeping") {
+  if (state.userProfile.role === "housekeeping") {
     openHousekeepingModal(roomId);
   } else {
     openReceptionModal(roomId);
   }
 }
 
-// --- RECEPTION MODAL LOGIC ---
+// --- RECEPTION LOGIC ---
 function openReceptionModal(roomId) {
   const room = state.rooms[roomId] || {};
   const stay = room.currentStay || {};
 
-  document.getElementById("recModalTitle").textContent = `Room ${roomId} - Guest & Billing`;
+  document.getElementById("recModalTitle").textContent = `Room ${roomId} Details`;
   document.getElementById("recGuestName").value = stay.guestName || "";
   document.getElementById("recCompanyName").value = stay.companyName || "";
   document.getElementById("recBillType").value = stay.billType || "";
@@ -179,7 +205,6 @@ function openReceptionModal(roomId) {
   document.getElementById("recFoodBill").value = stay.foodBill || 0;
   document.getElementById("recLaundryBill").value = stay.laundryBill || 0;
 
-  // Render Amenities Section
   const amenSec = document.getElementById("amenitiesSection");
   if (room.status === "occupied") {
     amenSec.classList.remove("hidden");
@@ -207,7 +232,6 @@ async function saveReceptionData() {
   const roomId = state.activeRoomId;
   const status = document.getElementById("recStatus").value;
 
-  // Gather Amenities
   const amenities = [];
   document.querySelectorAll("[data-amenity]").forEach(input => {
     const qty = parseInt(input.value);
@@ -243,7 +267,6 @@ async function processCheckout() {
   const stay = room.currentStay;
   const totalAmount = (stay.tariff || 0) + (stay.foodBill || 0) + (stay.laundryBill || 0);
 
-  // Archive to pending_bills
   await addDoc(collection(db, "pending_bills"), {
     roomNumber: roomId,
     guestName: stay.guestName || "N/A",
@@ -256,7 +279,6 @@ async function processCheckout() {
     updatedAt: Timestamp.now()
   });
 
-  // Reset Room State
   await updateDoc(doc(db, "rooms", roomId), {
     status: "cleaning",
     currentStay: {},
@@ -266,7 +288,7 @@ async function processCheckout() {
   closeModals();
 }
 
-// --- HOUSEKEEPING MODAL LOGIC ---
+// --- HOUSEKEEPING LOGIC ---
 function openHousekeepingModal(roomId) {
   const room = state.rooms[roomId] || {};
   const hk = room.housekeeping || { checklist: INITIAL_CHECKLIST };
@@ -275,7 +297,6 @@ function openHousekeepingModal(roomId) {
   document.getElementById("hkAssignedStaff").textContent = hk.assignedStaff || state.userProfile.name;
   document.getElementById("hkLastUpdated").textContent = hk.lastUpdated ? hk.lastUpdated.toDate().toLocaleString() : "N/A";
 
-  // Render Checklist
   const tasksList = document.getElementById("hkTasksList");
   tasksList.innerHTML = "";
   const checklist = hk.checklist || INITIAL_CHECKLIST;
@@ -301,7 +322,6 @@ function openHousekeepingModal(roomId) {
   document.getElementById("hkProgressPct").textContent = `${pct}%`;
   document.getElementById("hkProgressBar").style.width = `${pct}%`;
 
-  // Render Linen & TCM Catalog Grids
   renderQuantityGrid("hkLinenList", state.catalogs.linen, "linen");
   renderQuantityGrid("hkTcmList", state.catalogs.tcm, "tcm");
 
@@ -337,12 +357,10 @@ async function toggleHkTask(taskKey, isChecked) {
     "housekeeping.lastUpdated": Timestamp.now()
   };
 
-  if (done === total) {
-    updates["status"] = "empty"; // Auto Ready
-  }
+  if (done === total) updates["status"] = "empty";
 
   await updateDoc(doc(db, "rooms", roomId), updates);
-  openHousekeepingModal(roomId); // Refresh modal view
+  openHousekeepingModal(roomId);
 }
 
 async function recordLinenChange() {
@@ -353,15 +371,12 @@ async function recordLinenChange() {
   });
 
   if (items.length === 0) return;
-  
   const roomRef = doc(db, "rooms", state.activeRoomId);
   const roomSnap = await getDoc(roomRef);
   const currentLinen = roomSnap.data()?.housekeeping?.linenChanges || [];
 
-  await updateDoc(roomRef, {
-    "housekeeping.linenChanges": [...currentLinen, ...items]
-  });
-  alert("Linen logged successfully!");
+  await updateDoc(roomRef, { "housekeeping.linenChanges": [...currentLinen, ...items] });
+  alert("Linen log saved!");
 }
 
 async function recordTcmChange() {
@@ -372,18 +387,15 @@ async function recordTcmChange() {
   });
 
   if (items.length === 0) return;
-
   const roomRef = doc(db, "rooms", state.activeRoomId);
   const roomSnap = await getDoc(roomRef);
   const currentTcm = roomSnap.data()?.housekeeping?.tcmConsumption || [];
 
-  await updateDoc(roomRef, {
-    "housekeeping.tcmConsumption": [...currentTcm, ...items]
-  });
-  alert("TCM logged successfully!");
+  await updateDoc(roomRef, { "housekeeping.tcmConsumption": [...currentTcm, ...items] });
+  alert("TCM log saved!");
 }
 
-// --- ADMIN CONTROL PANEL LOGIC ---
+// --- ADMIN PANEL & PASSWORD MANAGEMENT ---
 async function loadAdminPanel() {
   loadCatalogToAdmin();
   
@@ -412,6 +424,19 @@ async function loadAdminPanel() {
     `;
     tbody.appendChild(tr);
   });
+}
+
+// ADMIN ACTION: Send Password Reset Link to Any User
+async function adminResetUserPassword() {
+  const targetEmail = prompt("Enter the email address of the user who needs a password reset:");
+  if (!targetEmail) return;
+
+  try {
+    await sendPasswordResetEmail(auth, targetEmail);
+    alert(`Password reset link sent to ${targetEmail}. They can follow the email instructions to update their password.`);
+  } catch (err) {
+    alert(`Error resetting password: ${err.message}`);
+  }
 }
 
 async function updatePendingBill(billId) {
@@ -464,17 +489,22 @@ async function removeCatalogItem(type, index) {
 document.getElementById("createUserForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const email = document.getElementById("newUserEmail").value;
+  const pass = document.getElementById("newUserPassword").value;
   const name = document.getElementById("newUserName").value;
   const role = document.getElementById("newUserRole").value;
 
-  alert("Note: Creating users via Client SDK switches active session. In production, use Admin SDK / Cloud Function. Creating Firestore entry directly.");
-
-  // Pre-seed user record
-  await addDoc(collection(db, "users"), { email, name, role });
-  alert("User profile record created!");
+  try {
+    const cred = await createUserWithEmailAndPassword(auth, email, pass);
+    await setDoc(doc(db, "users", cred.user.uid), {
+      uid: cred.user.uid, email, name, role
+    });
+    alert(`Account created successfully for ${email}`);
+  } catch (err) {
+    alert(`Failed to create account: ${err.message}`);
+  }
 });
 
-// --- EXCEL REPORTS (ExcelJS Integration) ---
+// --- EXCEL REPORTS ---
 async function exportDailyRevenue() {
   const dateVal = document.getElementById("revenueDateFilter").value;
   const workbook = new ExcelJS.Workbook();
@@ -619,7 +649,7 @@ function logout() {
   signOut(auth);
 }
 
-// Global Namespace Export for Inline HTML Handler Bindings
+// Global Namespace Bindings
 window.app = {
   switchTab,
   logout,
@@ -633,6 +663,7 @@ window.app = {
   addCatalogItem,
   removeCatalogItem,
   updatePendingBill,
+  adminResetUserPassword,
   exportDailyRevenue,
   exportOccupiedReport,
   exportPendingBillsReport,
