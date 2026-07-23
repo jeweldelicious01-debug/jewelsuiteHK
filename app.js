@@ -3,11 +3,10 @@ import {
   signInWithEmailAndPassword, 
   signOut, 
   onAuthStateChanged,
-  createUserWithEmailAndPassword,
   sendPasswordResetEmail
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 import { 
-  doc, getDoc, setDoc, updateDoc, collection, onSnapshot, addDoc, query, where, getDocs, Timestamp 
+  doc, getDoc, setDoc, updateDoc, collection, onSnapshot, addDoc, query, getDocs, Timestamp 
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 // Global Application State
@@ -18,13 +17,6 @@ const state = {
   catalogs: { amenities: [], linen: [], tcm: [] },
   activeRoomId: null
 };
-
-// Default Accounts Configuration for Initial Auto-Creation
-const DEFAULT_ACCOUNTS = [
-  { email: "admin@hotel.com", pass: "Admin123!", role: "admin", name: "System Admin" },
-  { email: "reception@hotel.com", pass: "Reception123!", role: "reception", name: "Front Desk Reception" },
-  { email: "housekeeping@hotel.com", pass: "Housekeeper123!", role: "housekeeping", name: "Head Housekeeper" }
-];
 
 // Floor Structure
 const ROOM_FLOORS = {
@@ -39,48 +31,33 @@ const INITIAL_CHECKLIST = {
   restockMinibar: false, checkAppliances: false, emptyTrash: false, finalInspection: false
 };
 
-// --- INITIALIZATION & AUTO-SEEDING ---
-async function ensureDefaultUsersExist() {
-  for (const acc of DEFAULT_ACCOUNTS) {
-    try {
-      // Attempt login to verify existence
-      await signInWithEmailAndPassword(auth, acc.email, acc.pass);
-    } catch (err) {
-      if (err.code === "auth/user-not-found" || err.code === "auth/invalid-credential") {
-        try {
-          // Register default user if missing
-          const cred = await createUserWithEmailAndPassword(auth, acc.email, acc.pass);
-          await setDoc(doc(db, "users", cred.user.uid), {
-            uid: cred.user.uid,
-            email: acc.email,
-            name: acc.name,
-            role: acc.role
-          });
-          console.log(`Auto-created account: ${acc.email}`);
-        } catch (createErr) {
-          console.warn(`Could not auto-create ${acc.email}:`, createErr.message);
-        }
-      }
-    }
-  }
-}
-
-// Automatically attempt account seeding on script load
-ensureDefaultUsersExist();
-
 // --- AUTHENTICATION LISTENER ---
 onAuthStateChanged(auth, async (user) => {
+  console.log("Auth State Changed:", user ? user.email : "Logged Out");
   if (user) {
     state.currentUser = user;
-    const userDoc = await getDoc(doc(db, "users", user.uid));
-    
-    if (userDoc.exists()) {
-      state.userProfile = userDoc.data();
-      document.getElementById("userDisplay").textContent = `${state.userProfile.name} (${state.userProfile.role.toUpperCase()})`;
+    try {
+      const userDoc = await getDoc(doc(db, "users", user.uid));
       
-      toggleUIByRole(state.userProfile.role);
-      showView("appView");
-      initDataListeners();
+      if (userDoc.exists()) {
+        state.userProfile = userDoc.data();
+        document.getElementById("userDisplay").textContent = `${state.userProfile.name || user.email} (${state.userProfile.role ? state.userProfile.role.toUpperCase() : 'USER'})`;
+        
+        toggleUIByRole(state.userProfile.role || "reception");
+        showView("appView");
+        initDataListeners();
+      } else {
+        console.warn("User authenticated, but no Firestore document found for UID:", user.uid);
+        // Fallback profile if doc doesn't exist in Firestore
+        state.userProfile = { role: "admin", name: user.email };
+        document.getElementById("userDisplay").textContent = `${user.email} (ADMIN)`;
+        toggleUIByRole("admin");
+        showView("appView");
+        initDataListeners();
+      }
+    } catch (err) {
+      console.error("Error fetching user document from Firestore:", err);
+      document.getElementById("authError").textContent = "Firestore Error: " + err.message;
     }
   } else {
     showView("authView");
@@ -90,14 +67,20 @@ onAuthStateChanged(auth, async (user) => {
 // LOGIN SUBMIT HANDLER
 document.getElementById("loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const email = document.getElementById("loginEmail").value;
-  const pass = document.getElementById("loginPassword").value;
-  document.getElementById("authError").textContent = "";
+  const email = document.getElementById("loginEmail").value.trim();
+  const pass = document.getElementById("loginPassword").value.trim();
+  const errContainer = document.getElementById("authError");
+  errContainer.textContent = "Logging in...";
+
+  console.log("Attempting login for:", email);
 
   try {
-    await signInWithEmailAndPassword(auth, email, pass);
+    const creds = await signInWithEmailAndPassword(auth, email, pass);
+    console.log("Login successful!", creds.user);
+    errContainer.textContent = "";
   } catch (err) {
-    document.getElementById("authError").textContent = "Invalid login credentials. Default credentials: admin@hotel.com / Admin123!";
+    console.error("Login Error:", err);
+    errContainer.textContent = `Login Failed: ${err.message}`;
   }
 });
 
@@ -181,7 +164,7 @@ function renderDashboard() {
 
 function handleRoomClick(roomId) {
   state.activeRoomId = roomId;
-  if (state.userProfile.role === "housekeeping") {
+  if (state.userProfile && state.userProfile.role === "housekeeping") {
     openHousekeepingModal(roomId);
   } else {
     openReceptionModal(roomId);
@@ -294,7 +277,7 @@ function openHousekeepingModal(roomId) {
   const hk = room.housekeeping || { checklist: INITIAL_CHECKLIST };
 
   document.getElementById("hkModalTitle").textContent = `Room ${roomId} - Housekeeping`;
-  document.getElementById("hkAssignedStaff").textContent = hk.assignedStaff || state.userProfile.name;
+  document.getElementById("hkAssignedStaff").textContent = hk.assignedStaff || (state.userProfile ? state.userProfile.name : "Staff");
   document.getElementById("hkLastUpdated").textContent = hk.lastUpdated ? hk.lastUpdated.toDate().toLocaleString() : "N/A";
 
   const tasksList = document.getElementById("hkTasksList");
@@ -353,7 +336,7 @@ async function toggleHkTask(taskKey, isChecked) {
   
   let updates = {
     "housekeeping.checklist": checklist,
-    "housekeeping.assignedStaff": state.userProfile.name,
+    "housekeeping.assignedStaff": state.userProfile ? state.userProfile.name : "Staff",
     "housekeeping.lastUpdated": Timestamp.now()
   };
 
@@ -367,7 +350,7 @@ async function recordLinenChange() {
   const items = [];
   document.querySelectorAll("[data-linen]").forEach(inp => {
     const qty = parseInt(inp.value);
-    if (qty > 0) items.push({ item: inp.dataset.linen, qty, timestamp: new Date().toISOString(), staff: state.userProfile.name });
+    if (qty > 0) items.push({ item: inp.dataset.linen, qty, timestamp: new Date().toISOString(), staff: state.userProfile ? state.userProfile.name : "Staff" });
   });
 
   if (items.length === 0) return;
@@ -383,7 +366,7 @@ async function recordTcmChange() {
   const items = [];
   document.querySelectorAll("[data-tcm]").forEach(inp => {
     const qty = parseInt(inp.value);
-    if (qty > 0) items.push({ item: inp.dataset.tcm, qty, timestamp: new Date().toISOString(), staff: state.userProfile.name });
+    if (qty > 0) items.push({ item: inp.dataset.tcm, qty, timestamp: new Date().toISOString(), staff: state.userProfile ? state.userProfile.name : "Staff" });
   });
 
   if (items.length === 0) return;
@@ -395,11 +378,10 @@ async function recordTcmChange() {
   alert("TCM log saved!");
 }
 
-// --- ADMIN PANEL & PASSWORD MANAGEMENT ---
+// --- ADMIN PANEL LOGIC ---
 async function loadAdminPanel() {
   loadCatalogToAdmin();
   
-  // Load Pending Bills
   const q = query(collection(db, "pending_bills"));
   const snap = await getDocs(q);
   const tbody = document.getElementById("pendingBillsTableBody");
@@ -426,14 +408,13 @@ async function loadAdminPanel() {
   });
 }
 
-// ADMIN ACTION: Send Password Reset Link to Any User
 async function adminResetUserPassword() {
   const targetEmail = prompt("Enter the email address of the user who needs a password reset:");
   if (!targetEmail) return;
 
   try {
     await sendPasswordResetEmail(auth, targetEmail);
-    alert(`Password reset link sent to ${targetEmail}. They can follow the email instructions to update their password.`);
+    alert(`Password reset link sent to ${targetEmail}.`);
   } catch (err) {
     alert(`Error resetting password: ${err.message}`);
   }
@@ -484,25 +465,6 @@ async function removeCatalogItem(type, index) {
   await setDoc(doc(db, "catalogs", type), { items: current });
   loadCatalogToAdmin();
 }
-
-// User Creation
-document.getElementById("createUserForm").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const email = document.getElementById("newUserEmail").value;
-  const pass = document.getElementById("newUserPassword").value;
-  const name = document.getElementById("newUserName").value;
-  const role = document.getElementById("newUserRole").value;
-
-  try {
-    const cred = await createUserWithEmailAndPassword(auth, email, pass);
-    await setDoc(doc(db, "users", cred.user.uid), {
-      uid: cred.user.uid, email, name, role
-    });
-    alert(`Account created successfully for ${email}`);
-  } catch (err) {
-    alert(`Failed to create account: ${err.message}`);
-  }
-});
 
 // --- EXCEL REPORTS ---
 async function exportDailyRevenue() {
