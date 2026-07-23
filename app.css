@@ -1,0 +1,148 @@
+:root {
+  --status-empty: #28a745;
+  --status-occupied: #dc3545;
+  --status-maintenance: #ffc107;
+  --status-cleaning: #e83e8c;
+  --bg-color: #f4f6f9;
+  --card-bg: #ffffff;
+  --text-color: #333333;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--bg-color);
+  color: var(--text-color);
+}
+
+.hidden { display: none !important; }
+
+/* Navbar */
+.navbar {
+  background: #1e293b;
+  color: #fff;
+  padding: 1rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.container { padding: 2rem; max-width: 1200px; margin: 0 auto; }
+
+/* Cards & Layout */
+.card {
+  background: var(--card-bg);
+  padding: 1.5rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  margin-bottom: 1.5rem;
+}
+
+.auth-card { max-width: 400px; margin: 5rem auto; text-align: center; }
+
+/* Dashboard Metrics */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.metric-card {
+  background: #fff;
+  padding: 1rem;
+  border-radius: 6px;
+  border-left: 6px solid #ccc;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+/* Status Colors */
+.border-green { border-color: var(--status-empty) !important; }
+.border-red { border-color: var(--status-occupied) !important; }
+.border-yellow { border-color: var(--status-maintenance) !important; }
+.border-pink { border-color: var(--status-cleaning) !important; }
+
+.status-empty { border: 2px solid var(--status-empty); }
+.status-occupied { border: 2px solid var(--status-occupied); }
+.status-maintenance { border: 2px solid var(--status-maintenance); }
+.status-cleaning { border: 2px solid var(--status-cleaning); }
+
+/* Room Grid */
+.floor-section { margin-bottom: 2rem; }
+.room-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 1rem;
+}
+
+.room-card {
+  background: #fff;
+  padding: 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: center;
+  transition: transform 0.1s ease;
+}
+
+.room-card:hover { transform: translateY(-2px); }
+.room-number { font-size: 1.25rem; font-weight: bold; }
+.room-status { font-size: 0.85rem; text-transform: capitalize; margin-top: 0.5rem; }
+
+/* Forms & Inputs */
+input, select, button {
+  width: 100%;
+  padding: 0.6rem;
+  margin-top: 0.4rem;
+  margin-bottom: 0.8rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+.inline-input { display: flex; gap: 0.5rem; }
+.inline-input button { width: auto; }
+
+/* Buttons */
+.btn { border: none; color: #fff; cursor: pointer; font-weight: 600; }
+.btn.primary { background: #2563eb; }
+.btn.secondary { background: #475569; }
+.btn.success { background: var(--status-empty); }
+.btn.danger { background: var(--status-occupied); }
+
+/* Modals */
+.modal {
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+}
+
+.modal-content {
+  background: #fff;
+  padding: 2rem;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 700px;
+  max-height: 85vh;
+  overflow-y: auto;
+  position: relative;
+}
+
+.close-btn { position: absolute; top: 1rem; right: 1rem; font-size: 1.5rem; cursor: pointer; }
+
+/* Component Helpers */
+.form-grid, .checklist-grid, .quantity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.5rem;
+}
+
+.progress-bar-container { background: #e2e8f0; border-radius: 4px; height: 10px; width: 100%; margin: 0.5rem 0; }
+.progress-bar { background: var(--status-empty); height: 100%; width: 0%; border-radius: 4px; transition: width 0.3s; }
+
+.data-table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+.data-table th, .data-table td { border: 1px solid #ddd; padding: 0.5rem; text-align: left; }
+.data-table th { background: #f1f5f9; }

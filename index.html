@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hotel Room Management System</title>
+  <link rel="stylesheet" href="app.css">
+  <!-- ExcelJS CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+</head>
+<body>
+
+  <!-- AUTH VIEW -->
+  <div id="authView" class="view">
+    <div class="card auth-card">
+      <h2>Hotel Management Login</h2>
+      <form id="loginForm">
+        <input type="email" id="loginEmail" placeholder="Email" required />
+        <input type="password" id="loginPassword" placeholder="Password" required />
+        <button type="submit" class="btn primary">Login</button>
+      </form>
+      <div id="authError" class="error-msg"></div>
+    </div>
+  </div>
+
+  <!-- MAIN APP VIEW -->
+  <div id="appView" class="view hidden">
+    <!-- Navbar -->
+    <header class="navbar">
+      <div class="brand">HotelOps Console</div>
+      <div class="user-info">
+        <span id="userDisplay">User (Role)</span>
+        <button id="adminTabBtn" class="btn secondary hidden" onclick="app.switchTab('admin')">Admin Panel</button>
+        <button id="dashboardTabBtn" class="btn secondary" onclick="app.switchTab('dashboard')">Dashboard</button>
+        <button class="btn danger" onclick="app.logout()">Logout</button>
+      </div>
+    </header>
+
+    <main class="container">
+      
+      <!-- DASHBOARD TAB -->
+      <section id="dashboardTab" class="tab-content">
+        
+        <!-- Summary Cards -->
+        <div class="metrics-grid">
+          <div class="metric-card border-green">
+            <h3>Empty</h3>
+            <p id="countEmpty">0</p>
+          </div>
+          <div class="metric-card border-red">
+            <h3>Occupied</h3>
+            <p id="countOccupied">0</p>
+          </div>
+          <div class="metric-card border-yellow">
+            <h3>Maintenance</h3>
+            <p id="countMaintenance">0</p>
+          </div>
+          <div class="metric-card border-pink">
+            <h3>Cleaning</h3>
+            <p id="countCleaning">0</p>
+          </div>
+        </div>
+
+        <!-- Action Bar / Report Downloads -->
+        <div class="action-bar" id="reportControls">
+          <h3>Reports Export</h3>
+          <div class="button-group">
+            <input type="date" id="revenueDateFilter">
+            <button class="btn secondary" onclick="app.exportDailyRevenue()">Daily Revenue</button>
+            <button class="btn secondary" onclick="app.exportOccupiedReport()">Occupied Rooms</button>
+            <button class="btn secondary" onclick="app.exportPendingBillsReport()">Pending Bills</button>
+            <button class="btn secondary" onclick="app.exportHousekeepingReport('tcm')">TCM Consumption</button>
+            <button class="btn secondary" onclick="app.exportHousekeepingReport('linen')">Linen Report</button>
+          </div>
+        </div>
+
+        <!-- Room Grid -->
+        <div id="floorContainer" class="floor-container">
+          <!-- Rooms dynamically rendered here -->
+        </div>
+      </section>
+
+      <!-- ADMIN TAB -->
+      <section id="adminTab" class="tab-content hidden">
+        <h2>Admin Management Panel</h2>
+
+        <div class="admin-grid">
+          <!-- User Management -->
+          <div class="card">
+            <h3>User Accounts</h3>
+            <form id="createUserForm">
+              <input type="email" id="newUserEmail" placeholder="Email" required />
+              <input type="password" id="newUserPassword" placeholder="Password" required />
+              <input type="text" id="newUserName" placeholder="Full Name" required />
+              <select id="newUserRole">
+                <option value="reception">Reception</option>
+                <option value="housekeeping">Housekeeping</option>
+                <option value="admin">Admin</option>
+              </select>
+              <button type="submit" class="btn primary">Create User Document</button>
+            </form>
+          </div>
+
+          <!-- Catalog Management -->
+          <div class="card">
+            <h3>Catalog Items</h3>
+            <select id="catalogTypeSelect" onchange="app.loadCatalogToAdmin()">
+              <option value="amenities">Guest Amenities</option>
+              <option value="linen">Linen Items</option>
+              <option value="tcm">TCM Items</option>
+            </select>
+            <div class="inline-input">
+              <input type="text" id="newCatalogItemText" placeholder="New Item Name" />
+              <button class="btn primary" onclick="app.addCatalogItem()">Add</button>
+            </div>
+            <ul id="adminCatalogList" class="item-list"></ul>
+          </div>
+        </div>
+
+        <!-- Pending Bills Management Table -->
+        <div class="card">
+          <h3>Pending Bills Management</h3>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Room</th>
+                <th>Guest</th>
+                <th>Check Out</th>
+                <th>Amount</th>
+                <th>Bill #</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="pendingBillsTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- MODAL: RECEPTION (Guest & Billing) -->
+  <div id="receptionModal" class="modal hidden">
+    <div class="modal-content">
+      <span class="close-btn" onclick="app.closeModals()">&times;</span>
+      <h2 id="recModalTitle">Room Details</h2>
+      <form id="receptionForm">
+        <div class="form-grid">
+          <div>
+            <label>Guest Name</label>
+            <input type="text" id="recGuestName" />
+          </div>
+          <div>
+            <label>Company Name</label>
+            <input type="text" id="recCompanyName" />
+          </div>
+          <div>
+            <label>Bill Type</label>
+            <input type="text" id="recBillType" />
+          </div>
+          <div>
+            <label>Tariff ($)</label>
+            <input type="number" step="0.01" id="recTariff" />
+          </div>
+          <div>
+            <label>Room Plan</label>
+            <input type="text" id="recRoomPlan" />
+          </div>
+          <div>
+            <label>Status</label>
+            <select id="recStatus">
+              <option value="empty">Empty</option>
+              <option value="occupied">Occupied</option>
+              <option value="maintenance">Maintenance</option>
+              <option value="cleaning">Cleaning</option>
+            </select>
+          </div>
+          <div>
+            <label>Check-in Date</label>
+            <input type="datetime-local" id="recCheckIn" />
+          </div>
+          <div>
+            <label>Check-out Date</label>
+            <input type="datetime-local" id="recCheckOut" />
+          </div>
+          <div>
+            <label>Food Bill ($)</label>
+            <input type="number" step="0.01" id="recFoodBill" />
+          </div>
+          <div>
+            <label>Laundry Bill ($)</label>
+            <input type="number" step="0.01" id="recLaundryBill" />
+          </div>
+        </div>
+
+        <!-- Consumable Amenities Sidebar Section -->
+        <div id="amenitiesSection" class="sub-section hidden">
+          <h3>Consumable Amenities</h3>
+          <div id="amenitiesChecklist" class="checklist-grid"></div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn primary" onclick="app.saveReceptionData()">Save Details</button>
+          <button type="button" class="btn success" onclick="app.processCheckout()">Check Out Guest</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: HOUSEKEEPING -->
+  <div id="housekeepingModal" class="modal hidden">
+    <div class="modal-content">
+      <span class="close-btn" onclick="app.closeModals()">&times;</span>
+      <h2 id="hkModalTitle">Housekeeping - Room</h2>
+      
+      <div class="hk-info">
+        <p>Assigned: <strong id="hkAssignedStaff">Unassigned</strong></p>
+        <p>Last Updated: <span id="hkLastUpdated">Never</span></p>
+      </div>
+
+      <!-- Checklist -->
+      <div class="hk-section">
+        <h3>Cleaning Checklist (<span id="hkProgressPct">0%</span>)</h3>
+        <div class="progress-bar-container"><div id="hkProgressBar" class="progress-bar"></div></div>
+        <div id="hkTasksList" class="checklist-grid"></div>
+      </div>
+
+      <!-- Linen Change -->
+      <div class="hk-section">
+        <h3>Linen Changes</h3>
+        <div id="hkLinenList" class="quantity-grid"></div>
+        <button class="btn secondary" onclick="app.recordLinenChange()">Save Linen Entry</button>
+      </div>
+
+      <!-- TCM Consumption -->
+      <div class="hk-section">
+        <h3>Tea / Coffee / Milk (TCM) Replacement</h3>
+        <div id="hkTcmList" class="quantity-grid"></div>
+        <button class="btn secondary" onclick="app.recordTcmChange()">Save TCM Entry</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase Modular Scripts -->
+  <script type="module" src="firebase-config.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
